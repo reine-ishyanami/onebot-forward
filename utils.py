@@ -2,10 +2,56 @@ import sys
 from config import APP_SETTING
 from loguru import logger
 
+import websockets
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.server import ServerConnection
+from websockets.typing import Data
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 logger.remove()
 
-logger.add(sys.stdout, level=APP_SETTING.logger.level.upper())
+# 配置日志文件
+logger.add(
+    "logs/forward.log",
+    rotation="100 MB",
+    compression="zip",
+    format="{time:YYYY-MM-DD HH:mm:ss:SSS} | {level} | {name}:{function}:{line} | {message}",
+    encoding="utf-8",
+    enqueue=True,
+)
+
+
+def format_log_message(record: "Record") -> str:
+    """格式化日志消息"""
+    current_time = record.get('time').strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    level = record.get('level').name
+
+    msg_max_len = 200
+
+    name = record.get('name')
+    function = record.get('function')
+    line = record.get('line')
+    msg = record.get('message')
+    msg= msg.replace('{', '{{').replace('}', '}}')
+    ret = f"<green>{current_time}</green> | "
+    ret += f"<level>{level:<7}</level>  | "
+    ret += f"<cyan>{name}:{function}:{line}</cyan> - "
+    ret += f"<level>{msg[:msg_max_len]}</level>\n"
+    return ret
+
+
+# 配置控制台输出
+logger.add(
+    sys.stderr,
+    format=format_log_message,
+    colorize=True,
+    level=APP_SETTING.logger.level.upper(),
+)
+
 
 def send_by_auth(gid: int) -> bool:
     """判断是否转发此消息"""
@@ -16,7 +62,7 @@ def send_by_auth(gid: int) -> bool:
             return True
         else:
             return False
-    if len(APP_SETTING.blacklist) > 0 :
+    if len(APP_SETTING.blacklist) > 0:
         # 如果群号属于黑名单，拦截
         if gid in APP_SETTING.blacklist:
             logger.info(f"receive message from {gid} in blacklist, ignore")
@@ -24,3 +70,15 @@ def send_by_auth(gid: int) -> bool:
         else:
             return True
     return True
+
+
+async def forward_message(
+    client: ServerConnection | ClientConnection, message: Data
+) -> bool:
+    """转发消息"""
+    try:
+        await client.send(message)
+        return True
+    except websockets.ConnectionClosed:
+        logger.warning("failed to send message")
+        return False

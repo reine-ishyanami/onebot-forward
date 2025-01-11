@@ -8,7 +8,7 @@ from websockets.asyncio.server import ServerConnection
 from websockets.http11 import Request, Response
 from websockets.typing import Data
 from config import APP_SETTING
-from utils import send_by_auth, logger
+from utils import send_by_auth, logger, forward_message
 
 
 ONEBOT_PROTOCOL_SIDE: Optional[ClientConnection] = None
@@ -39,11 +39,8 @@ async def send_to_all_client(message: Data):
         if client:
             # 尝试发送5次，如果失败则移除客户端连接
             for _ in range(5):
-                try:
-                    await client.send(message)
+                if await forward_message(client, message):
                     break
-                except websockets.ConnectionClosed:
-                    pass
             else:
                 expire_clients.add(client)
     # 否则广播给所有客户端
@@ -52,11 +49,8 @@ async def send_to_all_client(message: Data):
         for client in LANG_SERVICE_SIDE_SET:
             # 尝试发送5次，如果失败则移除客户端连接
             for _ in range(5):
-                try:
-                    await client.send(message)
+                if await forward_message(client, message):
                     break
-                except websockets.ConnectionClosed:
-                    pass
             else:
                 expire_clients.add(client)
     # 移除过期客户端连接
@@ -131,13 +125,10 @@ async def client_to_server(ws: ServerConnection):
                 gid = int(str(gid))
                 if send_by_auth(gid):
                     for _ in range(5):
-                        try:
-                            await ONEBOT_PROTOCOL_SIDE.send(message)
+                        if await forward_message(ONEBOT_PROTOCOL_SIDE, message):
                             echo = str(data.get("echo"))
                             ECHO_DICT.update({echo: ws})
                             break
-                        except websockets.ConnectionClosed:
-                            pass
                     else:
                         DEAD_MSG_QUEUE.append(message)
                         # 超过重试次数，证ws连接已关闭
@@ -147,13 +138,10 @@ async def client_to_server(ws: ServerConnection):
                         await reconnect_server()
             else:
                 for _ in range(5):
-                    try:
-                        await ONEBOT_PROTOCOL_SIDE.send(message)
+                    if await forward_message(ONEBOT_PROTOCOL_SIDE, message):
                         echo = str(data.get("echo"))
                         ECHO_DICT.update({echo: ws})
                         break
-                    except websockets.ConnectionClosed:
-                        pass
                 else:
                     DEAD_MSG_QUEUE.append(message)
                     # 超过重试次数，证ws连接已关闭
