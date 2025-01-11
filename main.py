@@ -276,7 +276,7 @@ async def main():
         max_size=None,
         process_response=process_response,
     ) as server:
-        logger.info(
+        logger.success(
             f"start server at {APP_SETTING.server.host}:{APP_SETTING.server.port}"
         )
         await server.wait_closed()

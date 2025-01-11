@@ -2,7 +2,6 @@ import yaml
 from pydantic import BaseModel
 
 
-
 class Server(BaseModel):
     host: str
     port: int
@@ -10,8 +9,14 @@ class Server(BaseModel):
     """心跳检测间隔，单位秒"""
 
 
+class Level(BaseModel):
+    """日志级别"""
+    console: str = "INFO"
+    file: str = "WARNING"
+
+
 class Logger(BaseModel):
-    level: str = "INFO"
+    level: Level = Level()
     """日志级别"""
 
 
@@ -20,7 +25,7 @@ class App(BaseModel):
     """服务配置"""
     to: Server
     """转发目标"""
-    logger: Logger
+    logger: Logger = Logger()
     """日志配置"""
     blacklist: list[int] = []
     """黑名单"""

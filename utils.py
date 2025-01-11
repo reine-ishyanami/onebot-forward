@@ -22,26 +22,29 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss:SSS} | {level} | {name}:{function}:{line} | {message}",
     encoding="utf-8",
     enqueue=True,
+    level=APP_SETTING.logger.level.file.upper()
 )
 
 
 def format_log_message(record: "Record") -> str:
     """格式化日志消息"""
-    current_time = record.get('time').strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    level = record.get('level').name
+    current_time = record.get("time").strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    level = record.get("level").name
 
     msg_max_len = 200
 
-    name = record.get('name')
-    function = record.get('function')
-    line = record.get('line')
-    msg = record.get('message')
-    msg= msg.replace('{', '{{').replace('}', '}}')
+    name = record.get("name")
+    function = record.get("function")
+    line = record.get("line")
+    msg = record.get("message")
+    msg = msg.replace("{", "{{").replace("}", "}}")
+    etc = "..." if len(msg) > msg_max_len else ""
     ret = f"<green>{current_time}</green> | "
     ret += f"<level>{level:<7}</level>  | "
     ret += f"<cyan>{name}:{function}:{line}</cyan> - "
-    ret += f"<level>{msg[:msg_max_len]}</level>\n"
+    ret += f"<level>{msg[:msg_max_len]}{etc}</level>\n"
     return ret
+
 
 
 # 配置控制台输出
@@ -49,7 +52,7 @@ logger.add(
     sys.stderr,
     format=format_log_message,
     colorize=True,
-    level=APP_SETTING.logger.level.upper(),
+    level=APP_SETTING.logger.level.console.upper(),
 )
 
 
