@@ -22,7 +22,7 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss:SSS} | {level} | {name}:{function}:{line} | {message}",
     encoding="utf-8",
     enqueue=True,
-    level=APP_SETTING.logger.level.file.upper()
+    level=APP_SETTING.logger.level.file.upper(),
 )
 
 
@@ -46,7 +46,6 @@ def format_log_message(record: "Record") -> str:
     return ret
 
 
-
 # 配置控制台输出
 logger.add(
     sys.stderr,
@@ -61,16 +60,18 @@ def send_by_auth(gid: int) -> bool:
     if len(APP_SETTING.whitelist) > 0:
         # 如果群号属于白名单，放行
         if gid in APP_SETTING.whitelist:
-            logger.info(f"receive message from {gid} in whitelist, forward")
+            logger.info(f"forward message from {gid} in whitelist")
             return True
         else:
+            logger.debug(f"ignore message from {gid} not in whitelist")
             return False
     if len(APP_SETTING.blacklist) > 0:
         # 如果群号属于黑名单，拦截
         if gid in APP_SETTING.blacklist:
-            logger.info(f"receive message from {gid} in blacklist, ignore")
+            logger.info(f"ignore message from {gid} in blacklist")
             return False
         else:
+            logger.debug(f"forward message from {gid} not in blacklist")
             return True
     return True
 
@@ -85,3 +86,8 @@ async def forward_message(
     except websockets.ConnectionClosed:
         logger.warning("failed to send message")
         return False
+
+
+async def send_notice_email(id: str):
+    """发送掉线通知邮件"""
+    pass

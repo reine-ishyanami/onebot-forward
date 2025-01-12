@@ -8,7 +8,7 @@ from websockets.asyncio.server import ServerConnection
 from websockets.http11 import Request, Response
 from websockets.typing import Data
 from config import APP_SETTING
-from utils import send_by_auth, logger, forward_message
+from utils import send_by_auth, logger, forward_message, send_notice_email
 
 
 ONEBOT_PROTOCOL_SIDE: Optional[ClientConnection] = None
@@ -32,19 +32,8 @@ async def send_to_all_client(message: Data):
     # 将要转发给客户端的消息
     data: dict = json.loads(str(message))
     expire_clients: set[ServerConnection] = set()
-    # 如果有回声字段，则转发给对应的客户端
-    if echo := data.get("echo"):
-        client = ECHO_DICT.pop(echo)
-        logger.info(f"echo: {echo}, callback: {message}")
-        if client:
-            # 尝试发送5次，如果失败则移除客户端连接
-            for _ in range(5):
-                if await forward_message(client, message):
-                    break
-            else:
-                expire_clients.add(client)
-    # 否则广播给所有客户端
-    else:
+    # 如果没用回声字段或者字段中不存在对应回声的键值对，则广播给所有客户端
+    if not (echo := data.get("echo")) or (echo not in ECHO_DICT):
         logger.info(f"broadcast, event: {message}")
         for client in LANG_SERVICE_SIDE_SET:
             # 尝试发送5次，如果失败则移除客户端连接
@@ -53,6 +42,16 @@ async def send_to_all_client(message: Data):
                     break
             else:
                 expire_clients.add(client)
+    # 否则发送给回声键对应的客户端
+    else:
+        client = ECHO_DICT.pop(echo)
+        logger.info(f"echo: {echo}, callback: {message}")
+        # 尝试发送5次，如果失败则移除客户端连接
+        for _ in range(5):
+            if await forward_message(client, message):
+                break
+        else:
+            expire_clients.add(client)
     # 移除过期客户端连接
     for client in expire_clients:
         logger.warning(f"client {client.remote_address} expired, remove")
@@ -72,6 +71,7 @@ async def server_to_client():
             # 处理黑白名单消息
             # 如果消息是从被转发的 ws 发送过来，则进行判断处理，否则直接放行
             data: dict = json.loads(str(message))
+            logger.debug(f"receive, event: {message}")
             # 白名单优先于黑名单
             gid = data.get("group_id")
             if gid:
@@ -88,7 +88,8 @@ async def server_to_client():
                     BOT_ID = int(str(data.get("self_id")))
                     LAST_HEARTBEAT_TIME = int(str(data.get("time")))
                     # 创建心跳检测任务
-                    asyncio.create_task(alive_check())
+                    if APP_SETTING.dead_check > 0:
+                        asyncio.create_task(alive_check())
                     continue
                 if (
                     data.get("post_type") == "meta_event"
@@ -102,7 +103,7 @@ async def server_to_client():
         logger.warning(
             f"server {ONEBOT_PROTOCOL_SIDE.remote_address} closed, waiting for reconnect"
         )
-        await reconnect_server()
+        # await reconnect_server()
 
 
 ECHO_DICT: dict[str, ServerConnection] = {}
@@ -126,8 +127,9 @@ async def client_to_server(ws: ServerConnection):
                 if send_by_auth(gid):
                     for _ in range(5):
                         if await forward_message(ONEBOT_PROTOCOL_SIDE, message):
-                            echo = str(data.get("echo"))
-                            ECHO_DICT.update({echo: ws})
+                            if echo := data.get("echo"):
+                                echo = str(echo)
+                                ECHO_DICT.update({echo: ws})
                             break
                     else:
                         DEAD_MSG_QUEUE.append(message)
@@ -135,12 +137,14 @@ async def client_to_server(ws: ServerConnection):
                         logger.warning(
                             f"server {ONEBOT_PROTOCOL_SIDE.remote_address} closed, waiting for reconnect"
                         )
+                        # 触发重连
                         await reconnect_server()
             else:
                 for _ in range(5):
                     if await forward_message(ONEBOT_PROTOCOL_SIDE, message):
-                        echo = str(data.get("echo"))
-                        ECHO_DICT.update({echo: ws})
+                        if echo := data.get("echo"):
+                            echo = str(echo)
+                            ECHO_DICT.update({echo: ws})
                         break
                 else:
                     DEAD_MSG_QUEUE.append(message)
@@ -148,6 +152,7 @@ async def client_to_server(ws: ServerConnection):
                     logger.warning(
                         f"server {ONEBOT_PROTOCOL_SIDE.remote_address} closed, waiting for reconnect"
                     )
+                    # 触发重连
                     await reconnect_server()
     except:  # noqa: E722
         # 客户端连接断开，移除客户端连接
@@ -155,7 +160,7 @@ async def client_to_server(ws: ServerConnection):
         LANG_SERVICE_SIDE_SET.remove(ws)
 
 
-CONNECT_LIOK = asyncio.Lock()
+CONNECT_LOCK = asyncio.Lock()
 """异步锁，避免多次发出协议端重连请求"""
 
 
@@ -163,10 +168,15 @@ async def reconnect_server():
     """
     尝试重新连接后端WebSocket服务器
     """
-    global ONEBOT_PROTOCOL_SIDE, APP_SETTING, CONNECT_LIOK, DEAD_MSG_QUEUE
+    global ONEBOT_PROTOCOL_SIDE, APP_SETTING, CONNECT_LOCK, DEAD_MSG_QUEUE, BOT_ID
+    # 重连开始，清除原WS连接
     ONEBOT_PROTOCOL_SIDE = None
-    async with CONNECT_LIOK:
+    async with CONNECT_LOCK:
         if not ONEBOT_PROTOCOL_SIDE:
+            # 发送掉线通知邮件
+            await send_notice_email(str(BOT_ID))
+            # 清除当前Bot ID
+            BOT_ID = 0
             while True:
                 try:
                     ONEBOT_PROTOCOL_SIDE = await websockets.connect(
@@ -175,7 +185,7 @@ async def reconnect_server():
                     )
                 except:  # noqa: E722
                     pass
-                if not ONEBOT_PROTOCOL_SIDE:  # noqa: E722
+                if not ONEBOT_PROTOCOL_SIDE:
                     logger.warning(
                         f"connect to server {APP_SETTING.to.host}:{APP_SETTING.to.port} failed, retry after 5 seconds"
                     )
@@ -213,7 +223,7 @@ async def alive_check():
         if not ALIVE_CHECK_ENABLE:
             ALIVE_CHECK_ENABLE = True
             while True:
-                if time.time() - LAST_HEARTBEAT_TIME > APP_SETTING.server.dead_check:
+                if time.time() - LAST_HEARTBEAT_TIME > APP_SETTING.dead_check:
                     logger.warning("heartbeat timeout, waiting for reconnect")
                     await reconnect_server()
                 else:
@@ -249,6 +259,7 @@ async def handle_client(websocket: ServerConnection):
 
 
 async def process_response(_: ServerConnection, request: Request, response: Response):
+    """处理WS请求的请求头"""
     global BOT_ID
     response.headers["Content-Type"] = "application/json"
     response.headers["X-Self-ID"] = str(BOT_ID)
