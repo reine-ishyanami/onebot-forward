@@ -1,11 +1,17 @@
+import asyncio
 import sys
+import websockets
 from config import APP_SETTING
 from loguru import logger
 
-import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.server import ServerConnection
 from websockets.typing import Data
+
+from email.header import Header
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import aiosmtplib
 
 from typing import TYPE_CHECKING
 
@@ -89,5 +95,35 @@ async def forward_message(
 
 
 async def send_notice_email(id: str):
-    """发送掉线通知邮件"""
-    pass
+    """发送掉线通知邮件
+    
+    Args:
+        id (str): bot id
+    """
+    mail_config = APP_SETTING.notice
+    if not mail_config.enable:
+        return
+    mail = mail_config.mail
+    message = MIMEMultipart("alternative")
+    message["Subject"] = Header(mail.title, 'utf-8') # type: ignore
+    message["From"] = mail_config.sender
+    message["To"] = mail_config.receiver
+    content = mail.content.format(bot_id=id)
+    message.attach(MIMEText(content))
+    # 连接SMTP服务器并发送邮件
+    use_tls = False
+    if mail_config.port == 465:
+        use_tls = True
+    try:
+        async with aiosmtplib.SMTP(hostname=mail_config.smtp, port=mail_config.port, use_tls=use_tls) as smtp:
+            await smtp.login(mail_config.sender, mail_config.password)
+            await smtp.send_message(message)
+    except Exception as e:
+        err = f"邮件发送失败，错误信息如下{e}"
+        return err
+    logger.info("通知邮件发送成功!")
+    return
+
+
+if __name__ == "__main__":
+    asyncio.run(send_notice_email("1234567890"))

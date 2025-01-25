@@ -103,7 +103,6 @@ async def server_to_client():
         logger.warning(
             f"server {ONEBOT_PROTOCOL_SIDE.remote_address} closed, waiting for reconnect"
         )
-        # await reconnect_server()
 
 
 ECHO_DICT: dict[str, ServerConnection] = {}
@@ -138,7 +137,7 @@ async def client_to_server(ws: ServerConnection):
                             f"server {ONEBOT_PROTOCOL_SIDE.remote_address} closed, waiting for reconnect"
                         )
                         # 触发重连
-                        await reconnect_server()
+                        await connect_server()
             else:
                 for _ in range(5):
                     if await forward_message(ONEBOT_PROTOCOL_SIDE, message):
@@ -153,7 +152,7 @@ async def client_to_server(ws: ServerConnection):
                         f"server {ONEBOT_PROTOCOL_SIDE.remote_address} closed, waiting for reconnect"
                     )
                     # 触发重连
-                    await reconnect_server()
+                    await connect_server()
     except:  # noqa: E722
         # 客户端连接断开，移除客户端连接
         logger.warning(f"client {ws.remote_address} closed, remove")
@@ -163,18 +162,30 @@ async def client_to_server(ws: ServerConnection):
 CONNECT_LOCK = asyncio.Lock()
 """异步锁，避免多次发出协议端重连请求"""
 
+LAST_HEARTBEAT_TIME = 0
+"""上次收到心跳包的时间"""
 
-async def reconnect_server():
+ALIVE_CHECK_ENABLE = False
+"""心跳检测开关"""
+
+ALIVE_CHECK_LOCK = asyncio.Lock()
+"""异步锁，避免多次发出心跳检测请求"""
+
+async def connect_server(startup: bool = False):
     """
     尝试重新连接后端WebSocket服务器
+
+    :param startup: 是否为启动时发起的连接
     """
-    global ONEBOT_PROTOCOL_SIDE, APP_SETTING, CONNECT_LOCK, DEAD_MSG_QUEUE, BOT_ID
+    global ONEBOT_PROTOCOL_SIDE, APP_SETTING, CONNECT_LOCK, DEAD_MSG_QUEUE, BOT_ID, LAST_HEARTBEAT_TIME
     # 重连开始，清除原WS连接
     ONEBOT_PROTOCOL_SIDE = None
     async with CONNECT_LOCK:
         if not ONEBOT_PROTOCOL_SIDE:
-            # 发送掉线通知邮件
-            await send_notice_email(str(BOT_ID))
+            # 如果不是启动时发起的连接，则证明连接断线，需要提醒用户上线重连
+            if not startup:
+                # 发送掉线通知邮件
+                await send_notice_email(str(BOT_ID))
             # 清除当前Bot ID
             BOT_ID = 0
             while True:
@@ -195,6 +206,10 @@ async def reconnect_server():
                     logger.success(
                         f"connect to backend server: {ONEBOT_PROTOCOL_SIDE.remote_address}"
                     )
+                    # 将当前时间设置为最后一次心跳时间
+                    LAST_HEARTBEAT_TIME = time.time()
+                    # 启动任务，用于转发后端WebSocket服务器消息到客户端
+                    asyncio.create_task(server_to_client())
                     # 重发死信
                     for message in DEAD_MSG_QUEUE:
                         await ONEBOT_PROTOCOL_SIDE.send(message)
@@ -202,15 +217,6 @@ async def reconnect_server():
                         DEAD_MSG_QUEUE.clear()
                     break
 
-
-LAST_HEARTBEAT_TIME = 0
-"""上次收到心跳包的时间"""
-
-ALIVE_CHECK_ENABLE = False
-"""心跳检测开关"""
-
-ALIVE_CHECK_LOCK = asyncio.Lock()
-"""异步锁，避免多次发出心跳检测请求"""
 
 
 async def alive_check():
@@ -225,7 +231,7 @@ async def alive_check():
             while True:
                 if time.time() - LAST_HEARTBEAT_TIME > APP_SETTING.dead_check:
                     logger.warning("heartbeat timeout, waiting for reconnect")
-                    await reconnect_server()
+                    await connect_server()
                 else:
                     # 每30秒检测一次心跳
                     await asyncio.sleep(30)
@@ -275,7 +281,7 @@ async def main():
     # 连接到后端WebSocket服务器
     global ONEBOT_PROTOCOL_SIDE, APP_SETTING
     if not ONEBOT_PROTOCOL_SIDE:
-        await reconnect_server()
+        await connect_server(startup=True)
         # 启动任务，用于转发后端WebSocket服务器消息到客户端
         asyncio.create_task(server_to_client())
 

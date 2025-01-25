@@ -18,6 +18,34 @@ class Logger(BaseModel):
     level: Level = Level()
     """日志级别"""
 
+class Mail(BaseModel):
+    """邮件内容配置"""
+
+    title: str = "你的Bot掉线了"
+    """邮件标题"""
+    subject: str = "OneBot 掉线通知"
+    """邮件主题"""
+    content: str = "OneBot 掉线通知：\n\n({bot_id}) 掉线了，请及时处理。"
+    """邮件内容"""
+
+
+class Notice(BaseModel):
+    """邮件通知配置"""
+
+    enable: bool = False
+    """是否启用"""
+    smtp: str
+    """SMTP服务器地址"""
+    port: int = 465
+    """SMTP服务器端口"""
+    sender: str
+    """发件人邮箱地址"""
+    password: str
+    """发件人邮箱密码"""
+    receiver: str
+    """收件人邮箱地址"""
+    mail: Mail = Mail()
+    """邮件内容配置"""
 
 class App(BaseModel):
     server: Server
@@ -32,6 +60,10 @@ class App(BaseModel):
     """黑名单"""
     whitelist: list[int] = []
     """白名单"""
+    notice: Notice
+    """邮件通知配置"""
+
+
 
 
 with open("app.yaml", "r") as file:
