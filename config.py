@@ -1,3 +1,4 @@
+from typing import Optional
 import yaml
 from pydantic import BaseModel
 
@@ -18,6 +19,7 @@ class Logger(BaseModel):
     level: Level = Level()
     """日志级别"""
 
+
 class Mail(BaseModel):
     """邮件内容配置"""
 
@@ -32,8 +34,6 @@ class Mail(BaseModel):
 class Notice(BaseModel):
     """邮件通知配置"""
 
-    enable: bool = False
-    """是否启用"""
     smtp: str
     """SMTP服务器地址"""
     port: int = 465
@@ -46,6 +46,7 @@ class Notice(BaseModel):
     """收件人邮箱地址"""
     mail: Mail = Mail()
     """邮件内容配置"""
+
 
 class App(BaseModel):
     server: Server
@@ -60,10 +61,8 @@ class App(BaseModel):
     """黑名单"""
     whitelist: list[int] = []
     """白名单"""
-    notice: Notice
+    notice: Optional[Notice] = None
     """邮件通知配置"""
-
-
 
 
 with open("app.yaml", "r") as file:

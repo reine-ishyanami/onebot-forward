@@ -101,7 +101,7 @@ async def send_notice_email(id: str):
         id (str): bot id
     """
     mail_config = APP_SETTING.notice
-    if not mail_config.enable:
+    if not mail_config:
         return
     mail = mail_config.mail
     message = MIMEMultipart("alternative")
